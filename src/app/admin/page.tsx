@@ -1,6 +1,7 @@
 import { getCurrentWeek, getWorkers, getSchedule } from "@/lib/data";
 import GenerateButton from "@/components/GenerateButton";
 import EditableScheduleTable from "@/components/EditableScheduleTable";
+import PublishToggle from "@/components/PublishToggle";
 
 const LEVEL_STYLE: Record<string, string> = {
   ok: "bg-ok-soft text-ok",
@@ -24,7 +25,10 @@ export default async function AdminDashboardPage() {
               Runs the rule engine against current People, Availability and Rules — evaluates several candidates and keeps the cleanest one.
             </p>
           </div>
-          <GenerateButton />
+          <div className="flex gap-2 items-start">
+            <GenerateButton />
+            {schedule && <PublishToggle published={schedule.published} />}
+          </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2.5 mt-4">
           <Stat label="Active workers" value={pool.length} />
@@ -36,6 +40,13 @@ export default async function AdminDashboardPage() {
             small
           />
         </div>
+        {schedule && (
+          <div className={`mt-3 px-2.5 py-2 rounded-md text-[12.5px] font-medium ${schedule.published ? "bg-ok-soft text-ok" : "bg-warn-soft text-warn"}`}>
+            {schedule.published
+              ? "Visible to the team — any edit will hide it again until you re-publish."
+              : "Hidden from the team (draft). Edit freely, then click \"Publish to team\" when it's ready."}
+          </div>
+        )}
       </div>
 
       {!schedule && (

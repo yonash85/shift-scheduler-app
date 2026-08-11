@@ -10,7 +10,8 @@ export default async function MySchedulePage() {
     getWorkers(),
     getTeamNote(),
   ]);
-  const schedule = week ? await getSchedule(week.id) : null;
+  const rawSchedule = week ? await getSchedule(week.id) : null;
+  const schedule = rawSchedule?.published ? rawSchedule : null;
   const pool = workers.filter((w) => !w.excluded);
 
   const myStats = schedule && me ? schedule.per_worker[me.id] : null;

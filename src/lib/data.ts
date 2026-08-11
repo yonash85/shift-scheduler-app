@@ -168,6 +168,7 @@ export interface ScheduleRow {
   warnings: { level: "ok" | "warn" | "crit"; msg: string }[];
   per_worker: Record<string, { morning: number; mid: number; evening: number; bridge: number; deepnight: number; total: number; night: number }>;
   generated_at: string;
+  published: boolean;
 }
 
 export async function getSchedule(weekId: string): Promise<ScheduleRow | null> {
@@ -180,10 +181,16 @@ export async function saveSchedule(
   weekId: string,
   assignments: Record<string, string[]>,
   warnings: { level: "ok" | "warn" | "crit"; msg: string }[],
-  perWorker: Record<string, unknown>
+  perWorker: Record<string, unknown>,
+  published: boolean
 ): Promise<void> {
   const { error } = await supabaseAdmin()
     .from("schedules")
-    .upsert({ week_id: weekId, assignments, warnings, per_worker: perWorker, generated_at: new Date().toISOString() });
+    .upsert({ week_id: weekId, assignments, warnings, per_worker: perWorker, generated_at: new Date().toISOString(), published });
+  if (error) throw error;
+}
+
+export async function setSchedulePublished(weekId: string, published: boolean): Promise<void> {
+  const { error } = await supabaseAdmin().from("schedules").update({ published }).eq("week_id", weekId);
   if (error) throw error;
 }

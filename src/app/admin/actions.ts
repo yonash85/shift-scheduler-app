@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { generateSchedule, computePerWorker, validateAssignments, type ShiftKey } from "@/lib/scheduler";
-import { getCurrentWeek, getWorkers, getAvailability, getRules, toEngineWorker, saveSchedule, getSchedule } from "@/lib/data";
+import { getCurrentWeek, getWorkers, getAvailability, getRules, toEngineWorker, saveSchedule, getSchedule, setSchedulePublished } from "@/lib/data";
 import { getSession } from "@/lib/session";
 
 export async function generateAction() {
@@ -14,7 +14,9 @@ export async function generateAction() {
   const workers = workerRows.map(toEngineWorker);
 
   const result = generateSchedule(workers, availability, rules);
-  await saveSchedule(week.id, result.assignments, result.warnings, result.perWorker);
+  // Always saved hidden — a fresh generate is a draft to review, not something to push
+  // straight to the team. Publish is a separate, explicit action below.
+  await saveSchedule(week.id, result.assignments, result.warnings, result.perWorker, false);
   revalidatePath("/admin");
   revalidatePath("/me");
 }
@@ -22,6 +24,24 @@ export async function generateAction() {
 async function requireAdmin() {
   const session = await getSession();
   if (!session?.isAdmin) throw new Error("Admin only");
+}
+
+export async function publishAction() {
+  await requireAdmin();
+  const week = await getCurrentWeek();
+  if (!week) throw new Error("No active week");
+  await setSchedulePublished(week.id, true);
+  revalidatePath("/admin");
+  revalidatePath("/me");
+}
+
+export async function unpublishAction() {
+  await requireAdmin();
+  const week = await getCurrentWeek();
+  if (!week) throw new Error("No active week");
+  await setSchedulePublished(week.id, false);
+  revalidatePath("/admin");
+  revalidatePath("/me");
 }
 
 /** Shared by add/remove: reloads the schedule, applies a mutation to its assignments,
@@ -43,7 +63,9 @@ async function mutateSlot(day: number, shiftKey: ShiftKey, mutate: (ids: string[
   const perWorker = computePerWorker(workers, assignments);
   const warnings = validateAssignments(workers, availability, rules, assignments);
 
-  await saveSchedule(week.id, assignments, warnings, perWorker);
+  // Any manual edit re-hides the schedule, same as a fresh generate — so a half-finished
+  // edit is never visible to the team mid-change. Publish again once it's ready.
+  await saveSchedule(week.id, assignments, warnings, perWorker, false);
   revalidatePath("/admin");
   revalidatePath("/me");
 }
