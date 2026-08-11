@@ -108,8 +108,16 @@ interface CanAssignOpts {
 }
 
 /** Builds one candidate schedule. Randomized tie-breaking means different calls land in
- * different places — generateSchedule() below runs several and keeps the cleanest. */
-export function generateOnce(workers: Worker[], availability: Availability, rules: Rules): ScheduleResult {
+ * different places — generateSchedule() below runs several and keeps the cleanest.
+ * `seedAssignments`, if given, is applied first and never touched again — every step below
+ * only fills what's still empty and counts the seed toward caps/quotas/night limits, so a
+ * manually pre-placed person is treated exactly like one the algorithm placed itself. */
+export function generateOnce(
+  workers: Worker[],
+  availability: Availability,
+  rules: Rules,
+  seedAssignments?: Record<string, string[]>
+): ScheduleResult {
   const pool = activePool(workers, availability);
   const warnings: Warning[] = [];
   if (pool.length === 0) {
@@ -213,7 +221,9 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
   const counts: Record<string, number> = {};
   const nightCounts: Record<string, number> = {};
   const morningCounts: Record<string, number> = {};
-  pool.forEach((w) => {
+  // Initialized over every worker, not just the active pool — a seeded (manually pre-placed)
+  // entry could in principle reference anyone, and this must never throw on a lookup.
+  workers.forEach((w) => {
     counts[w.id] = 0;
     nightCounts[w.id] = 0;
     morningCounts[w.id] = 0;
@@ -233,6 +243,20 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     assignments[`${d}|${shiftKey}`].push(wid);
   };
   const slotCount = (d: number, sk: ShiftKey) => assignments[`${d}|${sk}`].length;
+
+  // Locked entries (from seedAssignments) must never be moved once placed — Step D's
+  // leadership swap and Step G's repair pass both remove-and-replace an existing occupant to
+  // free up a slot, and need to know which occupants are off-limits for that.
+  const locked = new Set<string>(); // `${wid}|${d}|${shiftKey}`
+  if (seedAssignments) {
+    for (const key of Object.keys(seedAssignments)) {
+      const [dStr, sk] = key.split("|") as [string, ShiftKey];
+      for (const wid of seedAssignments[key]) {
+        put(wid, Number(dStr), sk);
+        locked.add(`${wid}|${dStr}|${sk}`);
+      }
+    }
+  }
 
   function canAssign(w: Worker, d: number, shiftKey: ShiftKey, opts: CanAssignOpts = {}): boolean {
     const av = getAvail(availability, w.id, DAYS[d], shiftKey);
@@ -491,10 +515,13 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
           .sort((a, b) => score(a, d, "deepnight") - score(b, d, "deepnight"))[0];
         if (candidateLead) secondNightSerbians.add(candidateLead.id);
       }
-      if (candidateLead) {
+      // Never swap out a manually locked occupant — if every current occupant is locked,
+      // there's genuinely nothing this step can do without breaking a manual placement.
+      const removableIds = ids.filter((id) => !locked.has(`${id}|${d}|deepnight`));
+      if (candidateLead && removableIds.length > 0) {
         // Prefer swapping out someone who has a spare night elsewhere, so this swap
         // doesn't strip away anyone's only night shift for the week.
-        const outId = ids.find((id) => nightCounts[id] > 1) ?? ids[0];
+        const outId = removableIds.find((id) => nightCounts[id] > 1) ?? removableIds[0];
         const dsKey = `${outId}|${d}`;
         dayShifts[dsKey] = dayShifts[dsKey].filter((sk) => sk !== "deepnight");
         counts[outId]--;
@@ -508,6 +535,8 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
             warnings.push({ level: "crit", msg: `Couldn't give ${outWorker.name} a night shift after they were swapped out of ${DAYS[d]} Deep Night for leadership coverage.` });
           }
         }
+      } else if (candidateLead && removableIds.length === 0) {
+        warnings.push({ level: "crit", msg: `${DAYS[d]} Deep Night has no lead, but every current occupant is manually locked — remove one manually or add a lead yourself.` });
       } else {
         warnings.push({ level: "crit", msg: `${DAYS[d]} Deep Night: no lead available to satisfy leadership coverage.` });
       }
@@ -549,6 +578,7 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
   }
   // ---- Step G: repair — swap a slot from an over-served worker to an under-served one ----
   function canRemove(oid: string, d: number, sk: ShiftKey): boolean {
+    if (locked.has(`${oid}|${d}|${sk}`)) return false;
     const o = byId.get(oid)!;
     if (sk === "morning" && morningCounts[oid] <= 1) return false;
     if (SHIFT_BY_KEY[sk].needsLead && isLead(o)) {
@@ -628,9 +658,11 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     warnings.unshift({ level: "ok", msg: "Coverage minimums, leadership, night limits, rest rules and availability were all respected — see the notes below for quota-related shortfalls." });
   }
 
+  // Every worker, not just the active pool — a seeded entry could reference someone
+  // otherwise excluded this week, and the summary table should still show their shifts.
   const perWorker: Record<string, PerWorkerRow> = {};
-  pool.forEach((w) => {
-    const row: PerWorkerRow = { morning: 0, mid: 0, evening: 0, bridge: 0, deepnight: 0, total: counts[w.id], night: nightCounts[w.id] };
+  workers.forEach((w) => {
+    const row: PerWorkerRow = { morning: 0, mid: 0, evening: 0, bridge: 0, deepnight: 0, total: counts[w.id] ?? 0, night: nightCounts[w.id] ?? 0 };
     for (let d = 0; d < 7; d++) {
       (dayShifts[`${w.id}|${d}`] || []).forEach((sk) => (row[sk] += 1));
     }
@@ -656,14 +688,21 @@ function scoreCandidate(res: ScheduleResult): number {
   return crit * 1000 + warn + morningSpread * 0.1;
 }
 
-/** Runs several candidate schedules and keeps the cleanest one (fewest broken rules / gaps). */
-export function generateSchedule(workers: Worker[], availability: Availability, rules: Rules): ScheduleResult {
+/** Runs several candidate schedules and keeps the cleanest one (fewest broken rules / gaps).
+ * `seedAssignments`, if given, is passed unchanged to every attempt — the locked entries stay
+ * fixed, only the randomized fill-in around them varies between candidates. */
+export function generateSchedule(
+  workers: Worker[],
+  availability: Availability,
+  rules: Rules,
+  seedAssignments?: Record<string, string[]>
+): ScheduleResult {
   const ATTEMPTS = 60;
   let best: ScheduleResult | null = null;
   let bestScore = Infinity;
   let triedCount = 0;
   for (let i = 0; i < ATTEMPTS; i++) {
-    const candidate = generateOnce(workers, availability, rules);
+    const candidate = generateOnce(workers, availability, rules, seedAssignments);
     triedCount++;
     const s = scoreCandidate(candidate);
     if (s < bestScore) {
@@ -674,6 +713,16 @@ export function generateSchedule(workers: Worker[], availability: Availability, 
   }
   best!.warnings.unshift({ level: "ok", msg: `Evaluated ${triedCount} candidate schedule${triedCount > 1 ? "s" : ""} and kept the cleanest one.` });
   return best!;
+}
+
+/** An all-empty assignments map — the starting point for a blank/manual schedule, or for
+ * clearing an existing one. Every day|shiftKey slot exists with an empty array, matching the
+ * shape generateOnce produces, so the rest of the app (EditableScheduleTable, computePerWorker,
+ * validateAssignments) doesn't need to special-case "no schedule yet" vs "empty schedule". */
+export function emptyAssignments(): Record<string, string[]> {
+  const assignments: Record<string, string[]> = {};
+  DAYS.forEach((_, d) => SHIFTS.forEach((s) => (assignments[`${d}|${s.key}`] = [])));
+  return assignments;
 }
 
 /** Recomputes per-worker shift counts from an assignments map — used after manual edits. */
