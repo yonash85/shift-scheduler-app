@@ -15,9 +15,7 @@ function countFlags(av: Record<string, Partial<Record<string, string>>>) {
 }
 
 export default async function AdminAvailabilityPage({ searchParams }: { searchParams: Promise<{ worker?: string }> }) {
-  const { worker: selectedId } = await searchParams;
-  const workers = await getWorkers();
-  const week = await getCurrentWeek();
+  const [{ worker: selectedId }, workers, week] = await Promise.all([searchParams, getWorkers(), getCurrentWeek()]);
   const availability = week ? await getAvailability(week.id, workers) : {};
   const active = selectedId ?? workers[0]?.id;
   const activeWorker = workers.find((w) => w.id === active);

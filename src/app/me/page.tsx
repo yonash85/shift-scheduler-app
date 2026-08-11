@@ -4,11 +4,13 @@ import ScheduleTable from "@/components/ScheduleTable";
 
 export default async function MySchedulePage() {
   const session = await getSession();
-  const me = await getWorkerById(session!.workerId);
-  const week = await getCurrentWeek();
+  const [me, week, workers, teamNote] = await Promise.all([
+    getWorkerById(session!.workerId),
+    getCurrentWeek(),
+    getWorkers(),
+    getTeamNote(),
+  ]);
   const schedule = week ? await getSchedule(week.id) : null;
-  const workers = await getWorkers();
-  const teamNote = await getTeamNote();
   const pool = workers.filter((w) => !w.excluded);
 
   const myStats = schedule && me ? schedule.per_worker[me.id] : null;

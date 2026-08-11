@@ -3,9 +3,7 @@ import { InlineTextArea } from "@/components/InlineControl";
 import { saveTeamNoteAction } from "./actions";
 
 export default async function AdminNotesPage() {
-  const workers = await getWorkers();
-  const teamNote = await getTeamNote();
-  const notes = await getAllNotes();
+  const [workers, teamNote, notes] = await Promise.all([getWorkers(), getTeamNote(), getAllNotes()]);
 
   return (
     <div className="flex flex-col gap-4.5">

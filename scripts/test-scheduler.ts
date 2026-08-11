@@ -49,8 +49,9 @@ const rules: Rules = {
 };
 
 let critRuns = 0, israeliViolations = 0, serbianOver2 = 0, over2Count = 0, mismatchMag = 0;
+let zeroNightCount = 0, zeroMorningCount = 0;
 let sunI = 0, sunS = 0, monI = 0, monS = 0;
-const RUNS = 25;
+const RUNS = 60;
 for (let i = 0; i < RUNS; i++) {
   const sched = generateSchedule(workers, availability, rules);
   if (sched.warnings.some((w) => w.level === "crit")) critRuns++;
@@ -60,6 +61,8 @@ for (let i = 0; i < RUNS; i++) {
     if (w.team === "israeli" && r.night > 1) israeliViolations++;
     if (w.team !== "israeli" && r.night > 2) serbianOver2++;
     if (w.team !== "israeli" && r.night === 2) secondNighters++;
+    if (r.night === 0) zeroNightCount++;
+    if (r.morning === 0) zeroMorningCount++;
     mismatchMag += Math.abs(r.total - w.quota);
   });
   if (secondNighters > 2) over2Count++;
@@ -71,6 +74,8 @@ console.log(`runs with crit warnings: ${critRuns}/${RUNS}`);
 console.log(`Israeli >1 night violations (must be 0): ${israeliViolations}`);
 console.log(`Serbian >2 night violations (must be 0): ${serbianOver2}`);
 console.log(`runs with >2 second-nighters (must be 0): ${over2Count}`);
+console.log(`workers ending with ZERO nights across all runs (must be 0): ${zeroNightCount}`);
+console.log(`workers ending with ZERO mornings across all runs (must be 0): ${zeroMorningCount}`);
 console.log(`avg quota mismatch magnitude: ${(mismatchMag / RUNS).toFixed(2)}`);
 console.log(`Sunday morning Israeli/Serbian: ${sunI}/${sunS}`);
 console.log(`Monday morning Israeli/Serbian: ${monI}/${monS}`);

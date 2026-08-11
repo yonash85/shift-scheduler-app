@@ -3,9 +3,7 @@ import { getWorkers, getCurrentWeek, getAvailability } from "@/lib/data";
 import AvailabilityGrid from "@/components/AvailabilityGrid";
 
 export default async function MyAvailabilityPage() {
-  const session = await getSession();
-  const workers = await getWorkers();
-  const week = await getCurrentWeek();
+  const [session, workers, week] = await Promise.all([getSession(), getWorkers(), getCurrentWeek()]);
   const availability = week ? await getAvailability(week.id, workers) : {};
 
   return (

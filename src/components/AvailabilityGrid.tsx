@@ -2,7 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { DAYS, SHIFTS, type AvailStatus, type ShiftKey } from "@/lib/scheduler";
-import { setAvailabilityCellAction, setFridaySaturdayVacationAction } from "@/app/actions/availability";
+import { setAvailabilityCellAction, setVacationDaysAction } from "@/app/actions/availability";
 
 const OPTIONS: { value: AvailStatus; symbol: string }[] = [
   { value: "can", symbol: "✓" },
@@ -24,32 +24,61 @@ export default function AvailabilityGrid({
 }) {
   const [local, setLocal] = useState(availability);
   const [pending, startTransition] = useTransition();
+  const [vacationDays, setVacationDays] = useState<Set<string>>(new Set());
 
   function setCell(day: string, shiftKey: ShiftKey, status: AvailStatus) {
     setLocal((prev) => ({ ...prev, [day]: { ...prev[day], [shiftKey]: status } }));
     startTransition(() => setAvailabilityCellAction(workerId, day, shiftKey, status));
   }
 
-  function takeVacation() {
-    setLocal((prev) => ({
-      ...prev,
-      Friday: { ...prev.Friday, morning: "cant", evening: "cant" },
-      Saturday: { ...prev.Saturday, morning: "cant", evening: "cant" },
-    }));
-    startTransition(() => setFridaySaturdayVacationAction(workerId));
+  function toggleVacationDay(day: string) {
+    setVacationDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(day)) next.delete(day);
+      else next.add(day);
+      return next;
+    });
+  }
+
+  function applyVacation() {
+    if (vacationDays.size === 0) return;
+    const days = [...vacationDays];
+    setLocal((prev) => {
+      const next = { ...prev };
+      for (const day of days) {
+        const dayStatuses: Partial<Record<ShiftKey, AvailStatus>> = { ...next[day] };
+        SHIFTS.forEach((s) => (dayStatuses[s.key] = "cant"));
+        next[day] = dayStatuses;
+      }
+      return next;
+    });
+    startTransition(() => setVacationDaysAction(workerId, days));
+    setVacationDays(new Set());
   }
 
   return (
     <div>
-      <div className="flex justify-end mb-2.5">
+      <div className="flex items-center justify-end gap-2 mb-3 flex-wrap">
+        <span className="text-[11.5px] text-text-muted mr-1">🏖️ Vacation — pick days, then apply (blocks every shift that day):</span>
+        {DAYS.map((day) => (
+          <button
+            key={day}
+            type="button"
+            onClick={() => toggleVacationDay(day)}
+            className={`text-[11.5px] px-2.5 py-1 rounded-md border ${
+              vacationDays.has(day) ? "bg-crit text-white border-crit" : "bg-surface text-text-muted border-border hover:bg-surface-2"
+            }`}
+          >
+            {day.slice(0, 3)}
+          </button>
+        ))}
         <button
           type="button"
-          disabled={pending}
-          onClick={takeVacation}
-          className="text-[12px] px-3 py-1.5 rounded-md bg-crit-soft text-crit hover:bg-crit hover:text-white disabled:opacity-60"
-          title="Blocks Morning + Evening on Friday & Saturday. Mid, Bridge and Deep Night are left as-is."
+          disabled={pending || vacationDays.size === 0}
+          onClick={applyVacation}
+          className="text-[12px] px-3 py-1.5 rounded-md bg-crit-soft text-crit hover:bg-crit hover:text-white disabled:opacity-40"
         >
-          🏖️ Weekend off (Fri+Sat)
+          Apply vacation
         </button>
       </div>
       <div className="overflow-x-auto border border-border rounded-lg">

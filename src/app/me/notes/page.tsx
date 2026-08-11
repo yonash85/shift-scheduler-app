@@ -5,8 +5,7 @@ import { saveMyNoteAction } from "./actions";
 
 export default async function MyNotesPage() {
   const session = await getSession();
-  const note = await getNote(session!.workerId);
-  const teamNote = await getTeamNote();
+  const [note, teamNote] = await Promise.all([getNote(session!.workerId), getTeamNote()]);
 
   return (
     <div className="flex flex-col gap-4.5">

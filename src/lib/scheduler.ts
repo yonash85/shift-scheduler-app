@@ -297,11 +297,8 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
       }
       if (placed) break;
     }
-    if (!placed)
-      warnings.push({
-        level: "warn",
-        msg: `Couldn't give ${w.name} a night shift this week (availability/rest conflicts) — night-shift requirement unmet for this worker.`,
-      });
+    // No warning here if this fails — Step A3 below retries with the same escalation
+    // the Morning guarantee uses, so this is an expected intermediate state, not a final one.
   }
   // ---- Step A2: Nights, phase 2 (fill remaining slots) ----
   for (const d of shuffled([0, 1, 2, 3, 4, 5, 6])) {
@@ -345,6 +342,35 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
         });
       }
     }
+  }
+  // ---- Step A3: guarantee every pool worker has >=1 night (hard rule — may exceed the
+  // day's slot count as a last resort, same escalation pattern as the Morning guarantee below).
+  // Nobody should reach this blocked by their night *cap* — a first night is always within
+  // cap (0+1 never exceeds a cap of at least 1) — so a miss is an availability/rest conflict.
+  // Factored out because Step D (leadership patch) can also strip someone's only night away
+  // when swapping in a lead, and needs the same fallback.
+  function tryGuaranteeNight(w: Worker): boolean {
+    const dayOrder = shuffled([0, 1, 2, 3, 4, 5, 6]);
+    const skOrder: ShiftKey[] = isLead(w) ? ["deepnight", "bridge"] : shuffled(["bridge", "deepnight"]);
+    for (const sk of skOrder) {
+      for (const d of dayOrder) {
+        if (canAssign(w, d, sk, { ignoreCap: true, ignoreQuota: true })) {
+          put(w.id, d, sk);
+          if (slotCount(d, sk) > cap[d][sk]) {
+            warnings.push({ level: "ok", msg: `Added an extra ${SHIFT_BY_KEY[sk].label} slot on ${DAYS[d]} so ${w.name} meets the 1-night minimum.` });
+          }
+          if (counts[w.id] > quotaOf[w.id]) {
+            warnings.push({ level: "warn", msg: `${w.name} was pushed to ${counts[w.id]}/${quotaOf[w.id]} shifts to satisfy the 1-night minimum — will try to rebalance.` });
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  for (const w of pool) {
+    if (nightCounts[w.id] > 0) continue;
+    if (!tryGuaranteeNight(w)) warnings.push({ level: "crit", msg: `Couldn't give ${w.name} any night shift — availability/rest rules block every day.` });
   }
   // ---- Step B: Weekend Mid (leads only) ----
   for (const d of [0, 6]) {
@@ -409,14 +435,22 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
         if (candidateLead) secondNightSerbians.add(candidateLead.id);
       }
       if (candidateLead) {
-        const outId = ids[0];
+        // Prefer swapping out someone who has a spare night elsewhere, so this swap
+        // doesn't strip away anyone's only night shift for the week.
+        const outId = ids.find((id) => nightCounts[id] > 1) ?? ids[0];
         const dsKey = `${outId}|${d}`;
         dayShifts[dsKey] = dayShifts[dsKey].filter((sk) => sk !== "deepnight");
         counts[outId]--;
         nightCounts[outId]--;
-        assignments[`${d}|deepnight`] = ids.slice(1);
+        assignments[`${d}|deepnight`] = ids.filter((id) => id !== outId);
         put(candidateLead.id, d, "deepnight");
         warnings.push({ level: "ok", msg: `Swapped in a lead for ${DAYS[d]} Deep Night to satisfy leadership coverage.` });
+        if (nightCounts[outId] === 0) {
+          const outWorker = byId.get(outId)!;
+          if (!tryGuaranteeNight(outWorker)) {
+            warnings.push({ level: "crit", msg: `Couldn't give ${outWorker.name} a night shift after they were swapped out of ${DAYS[d]} Deep Night for leadership coverage.` });
+          }
+        }
       } else {
         warnings.push({ level: "crit", msg: `${DAYS[d]} Deep Night: no lead available to satisfy leadership coverage.` });
       }

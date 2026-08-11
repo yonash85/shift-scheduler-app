@@ -10,8 +10,7 @@ const LEVEL_STYLE: Record<string, string> = {
 const LEVEL_LABEL: Record<string, string> = { ok: "OK", warn: "Note", crit: "Conflict" };
 
 export default async function AdminDashboardPage() {
-  const week = await getCurrentWeek();
-  const workers = await getWorkers();
+  const [week, workers] = await Promise.all([getCurrentWeek(), getWorkers()]);
   const schedule = week ? await getSchedule(week.id) : null;
   const pool = workers.filter((w) => !w.excluded);
 
