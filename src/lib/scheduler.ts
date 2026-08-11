@@ -613,3 +613,140 @@ export function generateSchedule(workers: Worker[], availability: Availability, 
   best!.warnings.unshift({ level: "ok", msg: `Evaluated ${triedCount} candidate schedule${triedCount > 1 ? "s" : ""} and kept the cleanest one.` });
   return best!;
 }
+
+/** Recomputes per-worker shift counts from an assignments map — used after manual edits. */
+export function computePerWorker(workers: Worker[], assignments: Record<string, string[]>): Record<string, PerWorkerRow> {
+  const perWorker: Record<string, PerWorkerRow> = {};
+  workers.forEach((w) => {
+    perWorker[w.id] = { morning: 0, mid: 0, evening: 0, bridge: 0, deepnight: 0, total: 0, night: 0 };
+  });
+  for (let d = 0; d < 7; d++) {
+    for (const s of SHIFTS) {
+      const ids = assignments[`${d}|${s.key}`] || [];
+      for (const wid of ids) {
+        if (!perWorker[wid]) continue; // worker removed from roster since this schedule was generated
+        perWorker[wid][s.key] += 1;
+        perWorker[wid].total += 1;
+        if (s.isNight) perWorker[wid].night += 1;
+      }
+    }
+  }
+  return perWorker;
+}
+
+/**
+ * Checks an existing assignments map (as-is, post manual edits) against every hard/soft rule
+ * and returns what it finds — doesn't build or change anything, just reports. Used so a manual
+ * edit on the dashboard can be flagged rather than blocked: the admin keeps final say, but sees
+ * exactly what they're overriding.
+ */
+export function validateAssignments(
+  workers: Worker[],
+  availability: Availability,
+  rules: Rules,
+  assignments: Record<string, string[]>
+): Warning[] {
+  const byId = new Map(workers.map((w) => [w.id, w]));
+  const warnings: Warning[] = [];
+  const dayShifts: Record<string, ShiftKey[]> = {};
+  const nightCounts: Record<string, number> = {};
+
+  for (let d = 0; d < 7; d++) {
+    for (const s of SHIFTS) {
+      const ids = assignments[`${d}|${s.key}`] || [];
+      for (const wid of ids) {
+        const key = `${wid}|${d}`;
+        if (!dayShifts[key]) dayShifts[key] = [];
+        dayShifts[key].push(s.key);
+        if (s.isNight) nightCounts[wid] = (nightCounts[wid] || 0) + 1;
+      }
+    }
+  }
+
+  // Availability
+  for (let d = 0; d < 7; d++) {
+    for (const s of SHIFTS) {
+      for (const wid of assignments[`${d}|${s.key}`] || []) {
+        const w = byId.get(wid);
+        if (!w) continue;
+        if (getAvail(availability, wid, DAYS[d], s.key) === "cant") {
+          warnings.push({ level: "crit", msg: `${w.name} is scheduled for ${DAYS[d]} ${s.label} despite being marked Can't that shift.` });
+        }
+      }
+    }
+  }
+
+  // Same-day and adjacent-day rest conflicts
+  for (const w of workers) {
+    for (let d = 0; d < 7; d++) {
+      const today = dayShifts[`${w.id}|${d}`] || [];
+      if (today.length >= 2) {
+        const isAllowedPair = today.length === 2 && today.includes("evening") && today.includes("deepnight");
+        if (!isAllowedPair) {
+          warnings.push({ level: "crit", msg: `${w.name} is double-booked on ${DAYS[d]}: ${today.join(" + ")}.` });
+        }
+      }
+      const prev = dayShifts[`${w.id}|${d - 1}`] || [];
+      if (today.includes("morning") && (prev.includes("bridge") || prev.includes("deepnight"))) {
+        warnings.push({ level: "crit", msg: `${w.name}: night shift on ${DAYS[d - 1]} then Morning on ${DAYS[d]} — no rest between them.` });
+      }
+      if (today.includes("deepnight") && prev.includes("evening")) {
+        warnings.push({ level: "crit", msg: `${w.name}: Evening on ${DAYS[d - 1]} then Deep Night on ${DAYS[d]} — no rest between them.` });
+      }
+      if (today.includes("mid") && DAYS[d] === "Saturday" && (prev.includes("bridge") || prev.includes("deepnight"))) {
+        warnings.push({ level: "crit", msg: `${w.name} worked a night shift Friday and is scheduled for Saturday Mid.` });
+      }
+    }
+  }
+
+  // Night caps
+  for (const w of workers) {
+    const nights = nightCounts[w.id] || 0;
+    if (w.team === "israeli" && nights > 1) {
+      warnings.push({ level: "crit", msg: `${w.name} (Israeli) has ${nights} night shifts this week — hard cap is 1.` });
+    } else if (nights > 2) {
+      warnings.push({ level: "crit", msg: `${w.name} has ${nights} night shifts this week — no one should exceed 2.` });
+    }
+  }
+  const twoNightSerbians = workers.filter((w) => w.team !== "israeli" && (nightCounts[w.id] || 0) >= 2);
+  if (twoNightSerbians.length > rules.maxSecondNightSerbians) {
+    warnings.push({
+      level: "warn",
+      msg: `${twoNightSerbians.length} Serbians have a 2nd night this week (${twoNightSerbians.map((w) => w.name).join(", ")}) — rule allows ${rules.maxSecondNightSerbians}.`,
+    });
+  }
+
+  // Leadership coverage
+  for (let d = 0; d < 7; d++) {
+    for (const s of SHIFTS) {
+      if (!s.needsLead) continue;
+      const ids = assignments[`${d}|${s.key}`] || [];
+      if (ids.length === 0) continue; // empty-slot case is covered by the minimum-coverage check below
+      const hasLead = ids.some((wid) => {
+        const w = byId.get(wid);
+        return !!w && (w.lead === "primary" || w.lead === "backup");
+      });
+      if (!hasLead) warnings.push({ level: "crit", msg: `${DAYS[d]} ${s.label} has no Enterprise Lead.` });
+    }
+  }
+
+  // Minimum coverage
+  for (let d = 0; d < 7; d++) {
+    for (const s of SHIFTS) {
+      if (s.weekendOnly && !WEEKEND.has(d)) continue;
+      const min =
+        s.key === "morning" ? rules.morningMin :
+        s.key === "mid" ? rules.midMin :
+        s.key === "evening" ? (WEEKEND.has(d) ? rules.eveningWeekendMin : rules.eveningWeekdayMin) :
+        s.key === "bridge" ? rules.bridgeMin :
+        rules.deepnightMin;
+      const count = (assignments[`${d}|${s.key}`] || []).length;
+      if (count < min) warnings.push({ level: "warn", msg: `${DAYS[d]} ${s.label}: ${count}/${min} minimum filled.` });
+    }
+  }
+
+  if (!warnings.some((w) => w.level === "crit") && !warnings.some((w) => w.level === "warn")) {
+    warnings.unshift({ level: "ok", msg: "No conflicts found." });
+  }
+  return warnings;
+}

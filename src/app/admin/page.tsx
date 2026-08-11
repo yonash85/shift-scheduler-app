@@ -1,6 +1,6 @@
 import { getCurrentWeek, getWorkers, getSchedule } from "@/lib/data";
 import GenerateButton from "@/components/GenerateButton";
-import ScheduleTable from "@/components/ScheduleTable";
+import EditableScheduleTable from "@/components/EditableScheduleTable";
 
 const LEVEL_STYLE: Record<string, string> = {
   ok: "bg-ok-soft text-ok",
@@ -60,8 +60,9 @@ export default async function AdminDashboardPage() {
           </div>
 
           <div className="bg-surface border border-border rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-text mb-3">Schedule — {week?.label}</h2>
-            <ScheduleTable assignments={schedule.assignments} workers={pool} />
+            <h2 className="text-sm font-semibold text-text mb-1">Schedule — {week?.label}</h2>
+            <p className="text-[12.5px] text-text-muted mb-3">Click × to remove someone, or &quot;+ add&quot; to place someone in a slot. Changes save immediately and re-check for conflicts.</p>
+            <EditableScheduleTable key={schedule.generated_at} assignments={schedule.assignments} workers={pool} />
           </div>
 
           <div className="bg-surface border border-border rounded-xl p-5">
