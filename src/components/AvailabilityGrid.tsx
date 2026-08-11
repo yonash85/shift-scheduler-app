@@ -2,7 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { DAYS, SHIFTS, type AvailStatus, type ShiftKey } from "@/lib/scheduler";
-import { setAvailabilityCellAction } from "@/app/actions/availability";
+import { setAvailabilityCellAction, setFridaySaturdayVacationAction } from "@/app/actions/availability";
 
 const OPTIONS: { value: AvailStatus; symbol: string }[] = [
   { value: "can", symbol: "✓" },
@@ -23,15 +23,36 @@ export default function AvailabilityGrid({
   availability: Record<string, Partial<Record<ShiftKey, AvailStatus>>>;
 }) {
   const [local, setLocal] = useState(availability);
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
 
   function setCell(day: string, shiftKey: ShiftKey, status: AvailStatus) {
     setLocal((prev) => ({ ...prev, [day]: { ...prev[day], [shiftKey]: status } }));
     startTransition(() => setAvailabilityCellAction(workerId, day, shiftKey, status));
   }
 
+  function takeVacation() {
+    setLocal((prev) => ({
+      ...prev,
+      Friday: { ...prev.Friday, morning: "cant", evening: "cant" },
+      Saturday: { ...prev.Saturday, morning: "cant", evening: "cant" },
+    }));
+    startTransition(() => setFridaySaturdayVacationAction(workerId));
+  }
+
   return (
-    <div className="overflow-x-auto border border-border rounded-lg">
+    <div>
+      <div className="flex justify-end mb-2.5">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={takeVacation}
+          className="text-[12px] px-3 py-1.5 rounded-md bg-crit-soft text-crit hover:bg-crit hover:text-white disabled:opacity-60"
+          title="Blocks Morning + Evening on Friday & Saturday. Mid, Bridge and Deep Night are left as-is."
+        >
+          🏖️ Weekend off (Fri+Sat)
+        </button>
+      </div>
+      <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-[12.8px]">
         <thead>
           <tr className="bg-surface-2">
@@ -78,6 +99,7 @@ export default function AvailabilityGrid({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
