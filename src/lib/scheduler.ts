@@ -291,9 +291,21 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     // avoid it unless nothing else works.
     if (shiftKey === "evening") {
       const sameDay = dayShifts[`${w.id}|${d}`] || [];
-      if (sameDay.includes("deepnight")) s += 40;
+      if (sameDay.includes("deepnight")) s += 80;
       const prevDay = dayShifts[`${w.id}|${d - 1}`] || [];
-      if (prevDay.includes("bridge")) s += 40;
+      if (prevDay.includes("bridge")) s += 80;
+    }
+    // Symmetric side of the same preference: also discourage placing the night shift itself
+    // on a day where the worker already has (or will have) the paired Evening — needed because
+    // Deep Night is usually assigned before Evening in the pipeline, and the leadership-guarantee
+    // steps score candidates for "deepnight"/"bridge" directly, not just "evening".
+    if (shiftKey === "deepnight") {
+      const sameDay = dayShifts[`${w.id}|${d}`] || [];
+      if (sameDay.includes("evening")) s += 80;
+    }
+    if (shiftKey === "bridge") {
+      const nextDay = dayShifts[`${w.id}|${d + 1}`] || [];
+      if (nextDay.includes("evening")) s += 80;
     }
     s += Math.random() * 3;
     return s;
@@ -304,10 +316,13 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
   // this is the scarce resource, so spend it deliberately rather than leaving it to chance.
   for (const w of shuffled(pool.filter(isLead)).concat(shuffled(pool.filter((w) => !isLead(w))))) {
     if (nightCounts[w.id] > 0) continue;
-    const dayOrder = shuffled([0, 1, 2, 3, 4, 5, 6]);
     let placed = false;
     const skOrder: ShiftKey[] = isLead(w) ? ["deepnight", "bridge"] : shuffled(["bridge", "deepnight"]);
     for (const sk of skOrder) {
+      // Score-sorted, not just shuffled — this is what lets the Israeli Sun/Mon/Wed night
+      // preference and the deepnight/evening same-day preference actually take effect here,
+      // instead of the very first random day winning regardless of fit.
+      const dayOrder = [0, 1, 2, 3, 4, 5, 6].sort((a, b) => score(w, a, sk) - score(w, b, sk));
       for (const d of dayOrder) {
         if (canAssign(w, d, sk)) {
           put(w.id, d, sk);
@@ -395,7 +410,14 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
   // ---- Step B: Weekend Mid (leads only) ----
   for (const d of [0, 6]) {
     if (cap[d].mid < 1) continue;
-    const leads = shuffled(pool.filter(isLead)).sort((a, b) => (a.lead === "primary" ? 0 : 1) - (b.lead === "primary" ? 0 : 1));
+    const leads = pool
+      .filter(isLead)
+      .sort((a, b) => {
+        const ap = a.lead === "primary" ? 0 : 1,
+          bp = b.lead === "primary" ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return score(a, d, "mid") - score(b, d, "mid");
+      });
     let placed = false;
     for (const w of leads) {
       if (canAssign(w, d, "mid")) {
@@ -412,7 +434,18 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
       if (cap[d][sk] <= 0) continue;
       const hasLead = assignments[`${d}|${sk}`].some((wid) => isLead(byId.get(wid)!));
       if (!hasLead) {
-        const leads = shuffled(pool.filter(isLead)).sort((a, b) => (a.lead === "primary" ? 0 : 1) - (b.lead === "primary" ? 0 : 1));
+        // Sorted by score (not just shuffled) so this guarantee prefers a lead who doesn't
+        // already have same-day Deep Night / prior-day Bridge, instead of grabbing whichever
+        // lead happens to shuffle first — otherwise the soft-preference penalty in score()
+        // never gets a say in these leadership-guarantee picks.
+        const leads = pool
+          .filter(isLead)
+          .sort((a, b) => {
+            const ap = a.lead === "primary" ? 0 : 1,
+              bp = b.lead === "primary" ? 0 : 1;
+            if (ap !== bp) return ap - bp;
+            return score(a, d, sk) - score(b, d, sk);
+          });
         for (const w of leads) {
           if (canAssign(w, d, sk)) {
             put(w.id, d, sk);
@@ -445,13 +478,16 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     const ids = assignments[`${d}|deepnight`];
     const hasLead = ids.some((wid) => isLead(byId.get(wid)!));
     if (!hasLead && ids.length > 0) {
-      let candidateLead = pool.find(
-        (w) => isLead(w) && !ids.includes(w.id) && canAssign(w, d, "deepnight", { ignoreCap: true }) && nightCounts[w.id] + 1 <= nightCapFor(w)
-      );
+      // Sorted by score (not just pool order / first match) so this prefers a lead who
+      // isn't already working Evening that day, instead of always grabbing the same first
+      // eligible lead in roster order regardless of the same-day-pairing soft preference.
+      let candidateLead = pool
+        .filter((w) => isLead(w) && !ids.includes(w.id) && canAssign(w, d, "deepnight", { ignoreCap: true }) && nightCounts[w.id] + 1 <= nightCapFor(w))
+        .sort((a, b) => score(a, d, "deepnight") - score(b, d, "deepnight"))[0];
       if (!candidateLead && secondNightSerbians.size < rules.maxSecondNightSerbians) {
-        candidateLead = pool.find(
-          (w) => isLead(w) && w.team !== "israeli" && !secondNightSerbians.has(w.id) && !ids.includes(w.id) && canAssign(w, d, "deepnight", { ignoreCap: true, ignoreNightCap: true })
-        );
+        candidateLead = pool
+          .filter((w) => isLead(w) && w.team !== "israeli" && !secondNightSerbians.has(w.id) && !ids.includes(w.id) && canAssign(w, d, "deepnight", { ignoreCap: true, ignoreNightCap: true }))
+          .sort((a, b) => score(a, d, "deepnight") - score(b, d, "deepnight"))[0];
         if (candidateLead) secondNightSerbians.add(candidateLead.id);
       }
       if (candidateLead) {
@@ -492,23 +528,22 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     if (!placed) warnings.push({ level: "crit", msg: `Couldn't give ${w.name} any Morning shift — availability/rest rules block every day.` });
   }
   // ---- Step F: balance remaining quota (fill anyone still under) ----
+  // Picks the best-scoring option across the whole week, not just the first one found in
+  // random day order — otherwise this ignores the soft preferences entirely (e.g. it would
+  // happily reuse a Deep Night day for Evening just because it happened to be checked first).
   for (const w of shuffled(pool)) {
     let guard = 0;
     while (counts[w.id] < quotaOf[w.id] && guard++ < 30) {
-      let placedHere = false;
-      const order = shuffled([0, 1, 2, 3, 4, 5, 6]);
-      for (const d of order) {
+      const options: { d: number; sk: ShiftKey }[] = [];
+      for (let d = 0; d < 7; d++) {
         for (const sk of ["evening", "morning", "mid"] as ShiftKey[]) {
           if (sk === "mid" && cap[d].mid < 1) continue;
-          if (canAssign(w, d, sk)) {
-            put(w.id, d, sk);
-            placedHere = true;
-            break;
-          }
+          if (canAssign(w, d, sk)) options.push({ d, sk });
         }
-        if (placedHere) break;
       }
-      if (!placedHere) break;
+      if (options.length === 0) break;
+      options.sort((a, b) => score(w, a.d, a.sk) - score(w, b.d, b.sk));
+      put(w.id, options[0].d, options[0].sk);
     }
   }
   // ---- Step G: repair — swap a slot from an over-served worker to an under-served one ----
@@ -536,25 +571,25 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     for (const w of shuffled(pool).sort((a, b) => quotaOf[b.id] - counts[b.id] - (quotaOf[a.id] - counts[a.id]))) {
       let guard = 0;
       while (counts[w.id] < quotaOf[w.id] && guard++ < 40) {
-        let swapped = false;
-        const days = shuffled([0, 1, 2, 3, 4, 5, 6]);
-        outer: for (const d of days) {
+        // Collect every valid swap across the whole week and take the best-scoring one,
+        // rather than the first one found in random day order (same fix as Step F).
+        const options: { d: number; sk: ShiftKey; oid: string }[] = [];
+        for (let d = 0; d < 7; d++) {
           for (const sk of ["evening", "morning", "mid"] as ShiftKey[]) {
             if (sk === "mid" && cap[d].mid < 1) continue;
             if (!canAssign(w, d, sk, { ignoreCap: true })) continue;
             const occupants = assignments[`${d}|${sk}`].filter((id) => id !== w.id && counts[id] > counts[w.id]);
             for (const oid of occupants) {
-              if (canRemove(oid, d, sk)) {
-                removeAssignment(oid, d, sk);
-                put(w.id, d, sk);
-                swapped = true;
-                anyProgress = true;
-                break outer;
-              }
+              if (canRemove(oid, d, sk)) options.push({ d, sk, oid });
             }
           }
         }
-        if (!swapped) break;
+        if (options.length === 0) break;
+        options.sort((a, b) => score(w, a.d, a.sk) - score(w, b.d, b.sk));
+        const best = options[0];
+        removeAssignment(best.oid, best.d, best.sk);
+        put(w.id, best.d, best.sk);
+        anyProgress = true;
       }
     }
   }

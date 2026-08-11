@@ -50,6 +50,7 @@ const rules: Rules = {
 
 let critRuns = 0, israeliViolations = 0, serbianOver2 = 0, over2Count = 0, mismatchMag = 0;
 let zeroNightCount = 0, zeroMorningCount = 0, eveningThenDeepnightViolations = 0;
+let sameDayDeepnightEvening = 0, bridgeThenEvening = 0;
 let sunI = 0, sunS = 0, monI = 0, monS = 0;
 const RUNS = 60;
 for (let i = 0; i < RUNS; i++) {
@@ -66,11 +67,20 @@ for (let i = 0; i < RUNS; i++) {
     mismatchMag += Math.abs(r.total - w.quota);
   });
   if (secondNighters > 2) over2Count++;
-  for (let d = 0; d < 6; d++) {
+  for (let d = 0; d < 7; d++) {
     const eveningIds = new Set(sched.assignments[`${d}|evening`]);
-    sched.assignments[`${d + 1}|deepnight`].forEach((wid) => {
-      if (eveningIds.has(wid)) eveningThenDeepnightViolations++;
+    (sched.assignments[`${d}|deepnight`] || []).forEach((wid) => {
+      if (eveningIds.has(wid)) sameDayDeepnightEvening++;
     });
+    if (d < 6) {
+      sched.assignments[`${d + 1}|deepnight`].forEach((wid) => {
+        if (eveningIds.has(wid)) eveningThenDeepnightViolations++;
+      });
+      const bridgeIds = new Set(sched.assignments[`${d}|bridge`]);
+      (sched.assignments[`${d + 1}|evening`] || []).forEach((wid) => {
+        if (bridgeIds.has(wid)) bridgeThenEvening++;
+      });
+    }
   }
   sched.assignments["0|morning"].forEach((wid) => (workers.find((w) => w.id === wid)!.team === "israeli" ? sunI++ : sunS++));
   sched.assignments["1|morning"].forEach((wid) => (workers.find((w) => w.id === wid)!.team === "israeli" ? monI++ : monS++));
@@ -83,6 +93,8 @@ console.log(`runs with >2 second-nighters (must be 0): ${over2Count}`);
 console.log(`workers ending with ZERO nights across all runs (must be 0): ${zeroNightCount}`);
 console.log(`workers ending with ZERO mornings across all runs (must be 0): ${zeroMorningCount}`);
 console.log(`Evening(D) -> Deep Night(D+1) violations (must be 0): ${eveningThenDeepnightViolations}`);
+console.log(`Same-day Deep Night+Evening instances (allowed, but should be RARE): ${sameDayDeepnightEvening} across ${RUNS} runs (${(sameDayDeepnightEvening / RUNS).toFixed(2)}/run)`);
+console.log(`Bridge->next-day-Evening instances (allowed, but should be RARE): ${bridgeThenEvening} across ${RUNS} runs (${(bridgeThenEvening / RUNS).toFixed(2)}/run)`);
 console.log(`avg quota mismatch magnitude: ${(mismatchMag / RUNS).toFixed(2)}`);
 console.log(`Sunday morning Israeli/Serbian: ${sunI}/${sunS}`);
 console.log(`Monday morning Israeli/Serbian: ${monI}/${monS}`);
