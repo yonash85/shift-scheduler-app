@@ -248,6 +248,17 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
       const prev = dayShifts[`${w.id}|${d - 1}`] || [];
       if (prev.includes("bridge") || prev.includes("deepnight")) return false;
     }
+    if (shiftKey === "deepnight") {
+      // Evening ends at midnight, Deep Night starts at midnight — zero rest between them.
+      const prev = dayShifts[`${w.id}|${d - 1}`] || [];
+      if (prev.includes("evening")) return false;
+    }
+    if (shiftKey === "evening") {
+      // Same check, other direction — Deep Night is usually assigned before Evening in the
+      // pipeline, so this can't just rely on the deepnight-side check above running first.
+      const next = dayShifts[`${w.id}|${d + 1}`] || [];
+      if (next.includes("deepnight")) return false;
+    }
     if (shiftKey === "mid" && DAYS[d] === "Saturday") {
       const fri = dayShifts[`${w.id}|${d - 1}`] || [];
       if (fri.includes("bridge") || fri.includes("deepnight")) return false;
@@ -274,6 +285,15 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     // Soft preference: Sunday & Monday Morning favors Israelis over Serbians
     if (shiftKey === "morning" && (DAYS[d] === "Sunday" || DAYS[d] === "Monday") && w.team === "israeli") {
       s -= 20;
+    }
+    // Soft preference: a night shift right before an Evening is allowed (rest-wise it's fine —
+    // Deep Night ends at 08:00, Bridge ends at 06:00, well before a 16:00 Evening start) but
+    // avoid it unless nothing else works.
+    if (shiftKey === "evening") {
+      const sameDay = dayShifts[`${w.id}|${d}`] || [];
+      if (sameDay.includes("deepnight")) s += 40;
+      const prevDay = dayShifts[`${w.id}|${d - 1}`] || [];
+      if (prevDay.includes("bridge")) s += 40;
     }
     s += Math.random() * 3;
     return s;
