@@ -32,3 +32,20 @@ export async function setVacationDaysAction(workerId: string, days: string[]) {
   revalidatePath("/admin/availability");
   revalidatePath("/me/availability");
 }
+
+// Undo: for each selected day, resets every shift type back to "can" — the exact reverse
+// of setVacationDaysAction, so a vacation applied by mistake doesn't need clearing cell by cell.
+export async function clearVacationDaysAction(workerId: string, days: string[]) {
+  const session = await getSession();
+  if (!session) throw new Error("Not authenticated");
+  if (!session.isAdmin && session.workerId !== workerId) throw new Error("Not authorized");
+  const week = await getCurrentWeek();
+  if (!week) throw new Error("No active week");
+  for (const day of days) {
+    for (const shift of SHIFTS) {
+      await setAvailabilityCell(week.id, workerId, day, shift.key, "can");
+    }
+  }
+  revalidatePath("/admin/availability");
+  revalidatePath("/me/availability");
+}

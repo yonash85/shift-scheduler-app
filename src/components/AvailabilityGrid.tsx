@@ -2,7 +2,7 @@
 
 import { useTransition, useState } from "react";
 import { DAYS, SHIFTS, type AvailStatus, type ShiftKey } from "@/lib/scheduler";
-import { setAvailabilityCellAction, setVacationDaysAction } from "@/app/actions/availability";
+import { setAvailabilityCellAction, setVacationDaysAction, clearVacationDaysAction } from "@/app/actions/availability";
 
 const OPTIONS: { value: AvailStatus; symbol: string }[] = [
   { value: "can", symbol: "✓" },
@@ -56,10 +56,26 @@ export default function AvailabilityGrid({
     setVacationDays(new Set());
   }
 
+  function clearVacation() {
+    if (vacationDays.size === 0) return;
+    const days = [...vacationDays];
+    setLocal((prev) => {
+      const next = { ...prev };
+      for (const day of days) {
+        const dayStatuses: Partial<Record<ShiftKey, AvailStatus>> = { ...next[day] };
+        SHIFTS.forEach((s) => (dayStatuses[s.key] = "can"));
+        next[day] = dayStatuses;
+      }
+      return next;
+    });
+    startTransition(() => clearVacationDaysAction(workerId, days));
+    setVacationDays(new Set());
+  }
+
   return (
     <div>
       <div className="flex items-center justify-end gap-2 mb-3 flex-wrap">
-        <span className="text-[11.5px] text-text-muted mr-1">🏖️ Vacation — pick days, then apply (blocks every shift that day):</span>
+        <span className="text-[11.5px] text-text-muted mr-1">🏖️ Vacation — pick days, then apply or remove (blocks/unblocks every shift that day):</span>
         {DAYS.map((day) => (
           <button
             key={day}
@@ -79,6 +95,14 @@ export default function AvailabilityGrid({
           className="text-[12px] px-3 py-1.5 rounded-md bg-crit-soft text-crit hover:bg-crit hover:text-white disabled:opacity-40"
         >
           Apply vacation
+        </button>
+        <button
+          type="button"
+          disabled={pending || vacationDays.size === 0}
+          onClick={clearVacation}
+          className="text-[12px] px-3 py-1.5 rounded-md bg-ok-soft text-ok hover:bg-ok hover:text-white disabled:opacity-40"
+        >
+          Remove vacation
         </button>
       </div>
       <div className="overflow-x-auto border border-border rounded-lg">
