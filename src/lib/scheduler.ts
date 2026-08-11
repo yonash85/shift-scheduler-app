@@ -238,12 +238,9 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     const av = getAvail(availability, w.id, DAYS[d], shiftKey);
     if (av === "cant") return false;
     const existing = dayShifts[`${w.id}|${d}`] || [];
-    if (existing.length >= 2) return false;
-    if (existing.length === 1) {
-      const pairOk =
-        (existing[0] === "deepnight" && shiftKey === "evening") || (existing[0] === "evening" && shiftKey === "deepnight");
-      if (!pairOk) return false;
-    }
+    // No two shifts on the same day, ever — including Deep Night + Evening. Deep Night's
+    // required rest runs until 16:00, exactly when Evening starts: zero gap, not a valid pairing.
+    if (existing.length >= 1) return false;
     if (shiftKey === "morning") {
       const prev = dayShifts[`${w.id}|${d - 1}`] || [];
       if (prev.includes("bridge") || prev.includes("deepnight")) return false;
@@ -262,6 +259,15 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     if (shiftKey === "mid" && DAYS[d] === "Saturday") {
       const fri = dayShifts[`${w.id}|${d - 1}`] || [];
       if (fri.includes("bridge") || fri.includes("deepnight")) return false;
+    }
+    if (shiftKey === "bridge" || shiftKey === "deepnight") {
+      // Forward-looking mirror of the morning/Saturday-Mid checks above: Deep Night and
+      // Bridge are usually assigned before Morning/Mid, but Step D's leadership patch can
+      // place one of these AFTER the next day's Morning/Mid was already decided — so this
+      // has to be checked in both directions, not just "does yesterday's night block today."
+      const next = dayShifts[`${w.id}|${d + 1}`] || [];
+      if (next.includes("morning")) return false;
+      if (next.includes("mid") && DAYS[d + 1] === "Saturday") return false;
     }
     if ((shiftKey === "bridge" || shiftKey === "deepnight") && !opts.ignoreNightCap) {
       if (nightCounts[w.id] + 1 > nightCapFor(w)) return false;
@@ -286,22 +292,13 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     if (shiftKey === "morning" && (DAYS[d] === "Sunday" || DAYS[d] === "Monday") && w.team === "israeli") {
       s -= 20;
     }
-    // Soft preference: a night shift right before an Evening is allowed (rest-wise it's fine —
-    // Deep Night ends at 08:00, Bridge ends at 06:00, well before a 16:00 Evening start) but
-    // avoid it unless nothing else works.
+    // Soft preference: a night shift (Bridge, which runs into the next calendar day) right
+    // before an Evening the next day is allowed but avoid it unless nothing else works.
+    // (Deep Night + same-day Evening used to be treated the same way, but that's a hard
+    // block now — see canAssign — so there's no same-day case left to score here.)
     if (shiftKey === "evening") {
-      const sameDay = dayShifts[`${w.id}|${d}`] || [];
-      if (sameDay.includes("deepnight")) s += 80;
       const prevDay = dayShifts[`${w.id}|${d - 1}`] || [];
       if (prevDay.includes("bridge")) s += 80;
-    }
-    // Symmetric side of the same preference: also discourage placing the night shift itself
-    // on a day where the worker already has (or will have) the paired Evening — needed because
-    // Deep Night is usually assigned before Evening in the pipeline, and the leadership-guarantee
-    // steps score candidates for "deepnight"/"bridge" directly, not just "evening".
-    if (shiftKey === "deepnight") {
-      const sameDay = dayShifts[`${w.id}|${d}`] || [];
-      if (sameDay.includes("evening")) s += 80;
     }
     if (shiftKey === "bridge") {
       const nextDay = dayShifts[`${w.id}|${d + 1}`] || [];
@@ -631,7 +628,7 @@ function scoreCandidate(res: ScheduleResult): number {
 
 /** Runs several candidate schedules and keeps the cleanest one (fewest broken rules / gaps). */
 export function generateSchedule(workers: Worker[], availability: Availability, rules: Rules): ScheduleResult {
-  const ATTEMPTS = 15;
+  const ATTEMPTS = 60;
   let best: ScheduleResult | null = null;
   let bestScore = Infinity;
   let triedCount = 0;
@@ -716,10 +713,7 @@ export function validateAssignments(
     for (let d = 0; d < 7; d++) {
       const today = dayShifts[`${w.id}|${d}`] || [];
       if (today.length >= 2) {
-        const isAllowedPair = today.length === 2 && today.includes("evening") && today.includes("deepnight");
-        if (!isAllowedPair) {
-          warnings.push({ level: "crit", msg: `${w.name} is double-booked on ${DAYS[d]}: ${today.join(" + ")}.` });
-        }
+        warnings.push({ level: "crit", msg: `${w.name} is double-booked on ${DAYS[d]}: ${today.join(" + ")}.` });
       }
       const prev = dayShifts[`${w.id}|${d - 1}`] || [];
       if (today.includes("morning") && (prev.includes("bridge") || prev.includes("deepnight"))) {

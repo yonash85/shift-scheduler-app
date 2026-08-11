@@ -93,7 +93,7 @@ console.log(`runs with >2 second-nighters (must be 0): ${over2Count}`);
 console.log(`workers ending with ZERO nights across all runs (must be 0): ${zeroNightCount}`);
 console.log(`workers ending with ZERO mornings across all runs (must be 0): ${zeroMorningCount}`);
 console.log(`Evening(D) -> Deep Night(D+1) violations (must be 0): ${eveningThenDeepnightViolations}`);
-console.log(`Same-day Deep Night+Evening instances (allowed, but should be RARE): ${sameDayDeepnightEvening} across ${RUNS} runs (${(sameDayDeepnightEvening / RUNS).toFixed(2)}/run)`);
+console.log(`Same-day Deep Night+Evening instances (must be 0 — hard block now): ${sameDayDeepnightEvening} across ${RUNS} runs (${(sameDayDeepnightEvening / RUNS).toFixed(2)}/run)`);
 console.log(`Bridge->next-day-Evening instances (allowed, but should be RARE): ${bridgeThenEvening} across ${RUNS} runs (${(bridgeThenEvening / RUNS).toFixed(2)}/run)`);
 console.log(`avg quota mismatch magnitude: ${(mismatchMag / RUNS).toFixed(2)}`);
 console.log(`Sunday morning Israeli/Serbian: ${sunI}/${sunS}`);
