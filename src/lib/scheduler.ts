@@ -284,25 +284,36 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
     if (av === "prefer_not") s += 50;
     s += counts[w.id] * 4; // spread load
     s += (quotaOf[w.id] - counts[w.id]) * -3; // prioritize those with more remaining quota
-    if (shiftKey !== "bridge" && shiftKey !== "deepnight" && rules.israeliWeekendSoft && w.team === "israeli" && DAYS[d] === "Saturday") {
-      const fri = dayShifts[`${w.id}|5`] || [];
-      if (fri.length > 0) s += 30;
+    // Soft preference: Israelis' Friday and Saturday count as one combined weekend slot —
+    // avoid giving the same Israeli a shift on both. Checked in both directions (whichever
+    // of the two days gets decided first) and for every shift type, including nights, since
+    // nights are assigned earlier in the pipeline than the rest of the week.
+    if (rules.israeliWeekendSoft && w.team === "israeli") {
+      if (DAYS[d] === "Saturday" && (dayShifts[`${w.id}|5`] || []).length > 0) s += 150;
+      if (DAYS[d] === "Friday" && (dayShifts[`${w.id}|6`] || []).length > 0) s += 150;
     }
     // Soft preference: Sunday & Monday Morning favors Israelis over Serbians
     if (shiftKey === "morning" && (DAYS[d] === "Sunday" || DAYS[d] === "Monday") && w.team === "israeli") {
       s -= 20;
     }
-    // Soft preference: a night shift (Bridge, which runs into the next calendar day) right
-    // before an Evening the next day is allowed but avoid it unless nothing else works.
-    // (Deep Night + same-day Evening used to be treated the same way, but that's a hard
-    // block now — see canAssign — so there's no same-day case left to score here.)
+    // Spread Mornings specifically (not just total shift count) — otherwise someone can end
+    // up with 4 Mornings and 1 Evening while another ends up with 1 Morning and 4 Evenings,
+    // both "balanced" by total count but lopsided on this particular shift type. Exempt
+    // Sun/Mon, same as the Israeli-favoring rule above — otherwise an Israeli who already
+    // got Sunday Morning loses the Monday-Morning preference to any fresh Serbian at 0.
+    if (shiftKey === "morning" && !(DAYS[d] === "Sunday" || DAYS[d] === "Monday")) {
+      s += morningCounts[w.id] * 20;
+    }
+    // Soft preference: a night shift (Bridge or Deep Night) right before an Evening the next
+    // day is allowed — both are well-rested by the time Evening starts — but avoid it unless
+    // nothing else works. (Deep Night + same-day Evening is a hard block now, see canAssign.)
     if (shiftKey === "evening") {
       const prevDay = dayShifts[`${w.id}|${d - 1}`] || [];
-      if (prevDay.includes("bridge")) s += 80;
+      if (prevDay.includes("bridge") || prevDay.includes("deepnight")) s += 120;
     }
-    if (shiftKey === "bridge") {
+    if (shiftKey === "bridge" || shiftKey === "deepnight") {
       const nextDay = dayShifts[`${w.id}|${d + 1}`] || [];
-      if (nextDay.includes("evening")) s += 80;
+      if (nextDay.includes("evening")) s += 120;
     }
     s += Math.random() * 3;
     return s;
@@ -452,16 +463,9 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
       }
       let guard = 0;
       while (slotCount(d, sk) < cap[d][sk] && guard++ < 200) {
-        const candidates = pool
-          .filter((w) => canAssign(w, d, sk))
-          .sort((a, b) => {
-            if (sk === "morning" && !(DAYS[d] === "Sunday" || DAYS[d] === "Monday")) {
-              const am = morningCounts[a.id] > 0 ? 1 : 0,
-                bm = morningCounts[b.id] > 0 ? 1 : 0;
-              if (am !== bm) return am - bm;
-            }
-            return score(a, d, sk) - score(b, d, sk);
-          });
+        // Morning-count spread is now handled inside score() itself (so it applies
+        // consistently everywhere score() is used, not just this loop) — plain score sort here.
+        const candidates = pool.filter((w) => canAssign(w, d, sk)).sort((a, b) => score(a, d, sk) - score(b, d, sk));
         if (candidates.length === 0) break;
         put(candidates[0].id, d, sk);
       }
@@ -597,6 +601,26 @@ export function generateOnce(workers: Worker[], availability: Availability, rule
       warnings.push({ level: "warn", msg: `${w.name} ended with ${counts[w.id]}/${quotaOf[w.id]} shifts (over quota) — kept the extra to satisfy the 1-Morning minimum without breaking another hard rule.` });
     }
   }
+  // Surface the two soft preferences as visible notes — both so the admin can see exactly
+  // where a trade-off happened, and so generateSchedule's best-of-N selection also counts
+  // these against a candidate (scoreCandidate counts all "warn"s), not just hard-rule gaps.
+  if (rules.israeliWeekendSoft) {
+    for (const w of pool) {
+      if (w.team !== "israeli") continue;
+      if ((dayShifts[`${w.id}|5`] || []).length > 0 && (dayShifts[`${w.id}|6`] || []).length > 0) {
+        warnings.push({ level: "warn", msg: `${w.name} is working both Friday and Saturday this week.` });
+      }
+    }
+  }
+  for (let d = 0; d < 6; d++) {
+    const nightIds = [...assignments[`${d}|bridge`], ...assignments[`${d}|deepnight`]];
+    const eveningIds = new Set(assignments[`${d + 1}|evening`]);
+    for (const wid of nightIds) {
+      if (eveningIds.has(wid)) {
+        warnings.push({ level: "warn", msg: `${byId.get(wid)!.name}: night shift on ${DAYS[d]} then Evening on ${DAYS[d + 1]}.` });
+      }
+    }
+  }
 
   if (!warnings.some((x) => x.level === "crit") && !warnings.some((x) => x.level === "warn")) {
     warnings.unshift({ level: "ok", msg: "All hard rules satisfied: coverage minimums, leadership, night limits, rest rules, quotas, and worker availability were all respected exactly." });
@@ -623,7 +647,13 @@ function scoreCandidate(res: ScheduleResult): number {
     if (w.level === "crit") crit++;
     else if (w.level === "warn") warn++;
   });
-  return crit * 1000 + warn;
+  // Fine-grained tiebreak below hard-rule cleanliness: among equally-clean candidates,
+  // prefer the one with the smallest gap between whoever got the most Mornings and
+  // whoever got the fewest — score() already nudges toward this within a single run, this
+  // just makes sure the best-of-N pick doesn't undo that by chance.
+  const mornings = Object.values(res.perWorker).map((r) => r.morning);
+  const morningSpread = mornings.length ? Math.max(...mornings) - Math.min(...mornings) : 0;
+  return crit * 1000 + warn + morningSpread * 0.1;
 }
 
 /** Runs several candidate schedules and keeps the cleanest one (fewest broken rules / gaps). */

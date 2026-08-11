@@ -50,13 +50,15 @@ const rules: Rules = {
 
 let critRuns = 0, israeliViolations = 0, serbianOver2 = 0, over2Count = 0, mismatchMag = 0;
 let zeroNightCount = 0, zeroMorningCount = 0, eveningThenDeepnightViolations = 0;
-let sameDayDeepnightEvening = 0, bridgeThenEvening = 0;
+let sameDayDeepnightEvening = 0, nightThenEvening = 0, israeliFriSatDouble = 0;
 let sunI = 0, sunS = 0, monI = 0, monS = 0;
+let morningSpreadSum = 0, morningSpreadMax = 0;
 const RUNS = 60;
 for (let i = 0; i < RUNS; i++) {
   const sched = generateSchedule(workers, availability, rules);
   if (sched.warnings.some((w) => w.level === "crit")) critRuns++;
   let secondNighters = 0;
+  const mornings: number[] = [];
   workers.forEach((w) => {
     const r = sched.perWorker[w.id];
     if (w.team === "israeli" && r.night > 1) israeliViolations++;
@@ -65,7 +67,16 @@ for (let i = 0; i < RUNS; i++) {
     if (r.night === 0) zeroNightCount++;
     if (r.morning === 0) zeroMorningCount++;
     mismatchMag += Math.abs(r.total - w.quota);
+    mornings.push(r.morning);
+    if (w.team === "israeli") {
+      const fri = sched.assignments["5|morning"].includes(w.id) || sched.assignments["5|evening"].includes(w.id) || sched.assignments["5|mid"].includes(w.id) || sched.assignments["5|bridge"].includes(w.id) || sched.assignments["5|deepnight"].includes(w.id);
+      const sat = sched.assignments["6|morning"].includes(w.id) || sched.assignments["6|evening"].includes(w.id) || sched.assignments["6|mid"].includes(w.id) || sched.assignments["6|bridge"].includes(w.id) || sched.assignments["6|deepnight"].includes(w.id);
+      if (fri && sat) israeliFriSatDouble++;
+    }
   });
+  const spread = Math.max(...mornings) - Math.min(...mornings);
+  morningSpreadSum += spread;
+  morningSpreadMax = Math.max(morningSpreadMax, spread);
   if (secondNighters > 2) over2Count++;
   for (let d = 0; d < 7; d++) {
     const eveningIds = new Set(sched.assignments[`${d}|evening`]);
@@ -76,9 +87,9 @@ for (let i = 0; i < RUNS; i++) {
       sched.assignments[`${d + 1}|deepnight`].forEach((wid) => {
         if (eveningIds.has(wid)) eveningThenDeepnightViolations++;
       });
-      const bridgeIds = new Set(sched.assignments[`${d}|bridge`]);
+      const nightIds = new Set([...sched.assignments[`${d}|bridge`], ...sched.assignments[`${d}|deepnight`]]);
       (sched.assignments[`${d + 1}|evening`] || []).forEach((wid) => {
-        if (bridgeIds.has(wid)) bridgeThenEvening++;
+        if (nightIds.has(wid)) nightThenEvening++;
       });
     }
   }
@@ -94,7 +105,9 @@ console.log(`workers ending with ZERO nights across all runs (must be 0): ${zero
 console.log(`workers ending with ZERO mornings across all runs (must be 0): ${zeroMorningCount}`);
 console.log(`Evening(D) -> Deep Night(D+1) violations (must be 0): ${eveningThenDeepnightViolations}`);
 console.log(`Same-day Deep Night+Evening instances (must be 0 — hard block now): ${sameDayDeepnightEvening} across ${RUNS} runs (${(sameDayDeepnightEvening / RUNS).toFixed(2)}/run)`);
-console.log(`Bridge->next-day-Evening instances (allowed, but should be RARE): ${bridgeThenEvening} across ${RUNS} runs (${(bridgeThenEvening / RUNS).toFixed(2)}/run)`);
+console.log(`Night(Bridge/DeepNight)->next-day-Evening instances (allowed, should be RARE): ${nightThenEvening} across ${RUNS} runs (${(nightThenEvening / RUNS).toFixed(2)}/run)`);
+console.log(`Israeli working BOTH Friday and Saturday (allowed, should be RARE): ${israeliFriSatDouble} across ${RUNS} runs (${(israeliFriSatDouble / RUNS).toFixed(2)}/run)`);
 console.log(`avg quota mismatch magnitude: ${(mismatchMag / RUNS).toFixed(2)}`);
+console.log(`Morning-count spread (max-min per run) — avg: ${(morningSpreadSum / RUNS).toFixed(2)}, worst single run: ${morningSpreadMax}`);
 console.log(`Sunday morning Israeli/Serbian: ${sunI}/${sunS}`);
 console.log(`Monday morning Israeli/Serbian: ${monI}/${monS}`);
