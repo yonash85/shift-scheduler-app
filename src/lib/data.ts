@@ -88,6 +88,14 @@ export async function createWeek(label: string, startsOn: string): Promise<{ id:
   return week;
 }
 
+/** All weeks, most recent first — for the read-only history view. Viewing an older week never
+ * changes which one is "current" (that would make a closed week editable again by accident). */
+export async function getAllWeeks(): Promise<{ id: string; label: string; starts_on: string }[]> {
+  const { data, error } = await supabaseAdmin().from("weeks").select("*").order("starts_on", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
 export async function getRules(): Promise<Rules> {
   const { data, error } = await supabaseAdmin().from("settings").select("rules").eq("id", 1).single();
   if (error) throw error;

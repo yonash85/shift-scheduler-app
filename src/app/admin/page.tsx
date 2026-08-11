@@ -2,6 +2,8 @@ import { getCurrentWeek, getWorkers, getSchedule } from "@/lib/data";
 import GenerateButton from "@/components/GenerateButton";
 import EditableScheduleTable from "@/components/EditableScheduleTable";
 import PublishToggle from "@/components/PublishToggle";
+import ClearScheduleButton from "@/components/ClearScheduleButton";
+import CompleteScheduleButton from "@/components/CompleteScheduleButton";
 
 const LEVEL_STYLE: Record<string, string> = {
   ok: "bg-ok-soft text-ok",
@@ -25,8 +27,10 @@ export default async function AdminDashboardPage() {
               Runs the rule engine against current People, Availability and Rules — evaluates several candidates and keeps the cleanest one.
             </p>
           </div>
-          <div className="flex gap-2 items-start">
+          <div className="flex gap-2 items-start flex-wrap">
             <GenerateButton />
+            {schedule && <CompleteScheduleButton />}
+            <ClearScheduleButton hasSchedule={!!schedule} />
             {schedule && <PublishToggle published={schedule.published} />}
           </div>
         </div>
@@ -51,7 +55,7 @@ export default async function AdminDashboardPage() {
 
       {!schedule && (
         <div className="bg-surface border border-border rounded-xl p-5 text-[13px] text-text-muted">
-          No schedule generated yet. Click &quot;Generate schedule&quot; once People, Availability and Rules look right.
+          No schedule yet. Click &quot;Generate schedule&quot; for a full automatic one, or &quot;Start manual schedule&quot; to place a few people yourself first — either way you&apos;ll get &quot;Complete automatically&quot; below to fill in whatever&apos;s left.
         </div>
       )}
 
