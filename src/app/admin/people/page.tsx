@@ -1,6 +1,6 @@
 import { getWorkers } from "@/lib/data";
-import { InlineSelect, InlineNumber, InlineCheckbox } from "@/components/InlineControl";
-import { setLeadAction, setQuotaAction, setExcludedAction, setSecondNightAction } from "./actions";
+import { InlineSelect, InlineNumber, InlineCheckbox, InlineText } from "@/components/InlineControl";
+import { setNameAction, setLeadAction, setQuotaAction, setExcludedAction, setSecondNightAction } from "./actions";
 import { ResetPinButton, RemoveWorkerButton } from "./RowActions";
 import AddWorkerForm from "./AddWorkerForm";
 
@@ -35,7 +35,10 @@ export default async function PeoplePage() {
             <tbody>
               {workers.map((w) => (
                 <tr key={w.id}>
-                  <td className="px-2.5 py-1.5 border-b border-border whitespace-nowrap">{w.name}{w.is_admin && <span className="ml-1.5 text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5">admin</span>}</td>
+                  <td className="px-2.5 py-1.5 border-b border-border whitespace-nowrap">
+                    <InlineText id={w.id} value={w.name} action={setNameAction} className="w-32" />
+                    {w.is_admin && <span className="ml-1.5 text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5">admin</span>}
+                  </td>
                   <td className="px-2.5 py-1.5 border-b border-border">
                     <span className="text-[11px] bg-surface-3 rounded px-1.5 py-0.5">{w.team === "israeli" ? "Israeli" : "Serbian"}</span>
                   </td>

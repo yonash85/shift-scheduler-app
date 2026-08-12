@@ -17,6 +17,15 @@ export async function addWorkerAction(input: { name: string; team: Team; lead: L
   return { pin };
 }
 
+export async function setNameAction(id: string, name: string) {
+  await updateWorker(id, { name });
+  revalidatePath("/admin/people");
+  revalidatePath("/admin");
+  revalidatePath("/admin/history");
+  revalidatePath("/admin/availability");
+  revalidatePath("/me");
+}
+
 export async function setLeadAction(id: string, lead: string) {
   await updateWorker(id, { lead: (lead || null) as LeadRole });
   revalidatePath("/admin/people");

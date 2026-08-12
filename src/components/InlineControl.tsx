@@ -75,6 +75,35 @@ export function InlineNumber<TId extends string>({
   );
 }
 
+export function InlineText<TId extends string>({
+  id,
+  value,
+  action,
+  className,
+}: {
+  id: TId;
+  value: string;
+  action: (id: TId, value: string) => Promise<void>;
+  className?: string;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [local, setLocal] = useState(value);
+  return (
+    <input
+      type="text"
+      value={local}
+      disabled={pending}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        const trimmed = local.trim();
+        if (trimmed && trimmed !== value) startTransition(() => action(id, trimmed));
+        else setLocal(value);
+      }}
+      className={`${inputCls} ${className ?? ""}`}
+    />
+  );
+}
+
 export function InlineCheckbox<TId extends string>({
   id,
   checked,

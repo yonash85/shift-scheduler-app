@@ -55,7 +55,7 @@ export async function createWorker(input: {
   return data as WorkerRow;
 }
 
-export async function updateWorker(id: string, fields: Partial<Pick<WorkerRow, "lead" | "quota" | "excluded" | "night_cap_override">>): Promise<void> {
+export async function updateWorker(id: string, fields: Partial<Pick<WorkerRow, "name" | "lead" | "quota" | "excluded" | "night_cap_override">>): Promise<void> {
   const { error } = await supabaseAdmin().from("workers").update(fields).eq("id", id);
   if (error) throw error;
 }
