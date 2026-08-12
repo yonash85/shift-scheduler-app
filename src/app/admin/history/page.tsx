@@ -1,6 +1,7 @@
 import { getAllWeeks, getCurrentWeek, getSchedule, getWorkers } from "@/lib/data";
 import ScheduleTable from "@/components/ScheduleTable";
 import NewWeekForm from "./NewWeekForm";
+import WeekRow from "./WeekRow";
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ week?: string }> }) {
   const { week: weekParam } = await searchParams;
@@ -25,21 +26,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
         {weeks.length === 0 && <p className="text-[12.5px] text-text-muted">No weeks yet.</p>}
         <div className="flex flex-col gap-1.5">
           {weeks.map((w) => (
-            <a
-              key={w.id}
-              href={`/admin/history?week=${w.id}`}
-              className={`flex items-center justify-between px-2.5 py-2 rounded-md text-[12.5px] ${
-                w.id === selectedWeek?.id ? "bg-accent-soft text-accent-strong font-semibold" : "hover:bg-surface-2 text-text"
-              }`}
-            >
-              <span>{w.label}</span>
-              <span className="flex items-center gap-2">
-                {w.id === currentWeek?.id && (
-                  <span className="text-[10px] uppercase tracking-wide bg-ok-soft text-ok px-1.5 py-0.5 rounded font-bold">Current</span>
-                )}
-                <span className="text-text-muted">{new Date(w.starts_on).toLocaleDateString()}</span>
-              </span>
-            </a>
+            <WeekRow key={w.id} week={w} isSelected={w.id === selectedWeek?.id} isCurrent={w.id === currentWeek?.id} />
           ))}
         </div>
       </div>

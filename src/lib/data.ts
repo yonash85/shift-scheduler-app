@@ -96,6 +96,13 @@ export async function getAllWeeks(): Promise<{ id: string; label: string; starts
   return data;
 }
 
+/** Renames/redates an existing week in place — e.g. fixing "Week of Aug 16" without creating
+ * a whole new week or touching which one is current. */
+export async function updateWeek(weekId: string, label: string, startsOn: string): Promise<void> {
+  const { error } = await supabaseAdmin().from("weeks").update({ label, starts_on: startsOn }).eq("id", weekId);
+  if (error) throw error;
+}
+
 export async function getRules(): Promise<Rules> {
   const { data, error } = await supabaseAdmin().from("settings").select("rules").eq("id", 1).single();
   if (error) throw error;
