@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
-import { getCurrentWeek, setAvailabilityCell } from "@/lib/data";
+import { getCurrentWeek, getWorkers, setAvailabilityCell, setAvailabilityCells } from "@/lib/data";
 import { SHIFTS, type AvailStatus, type ShiftKey } from "@/lib/scheduler";
+import { parseAvailabilityCsv } from "@/lib/csvImport";
 
 export async function setAvailabilityCellAction(workerId: string, day: string, shiftKey: ShiftKey, status: AvailStatus) {
   const session = await getSession();
@@ -48,4 +49,28 @@ export async function clearVacationDaysAction(workerId: string, days: string[]) 
   }
   revalidatePath("/admin/availability");
   revalidatePath("/me/availability");
+}
+
+export interface CsvImportSummary {
+  matched: { blockName: string; workerName: string }[];
+  unmatched: string[];
+  cellsUpdated: number;
+}
+
+/** Imports a per-person weekly availability CSV (the team's real planning-sheet export) —
+ * matches each person's block to an existing worker by name and overwrites their availability
+ * for this week. Doesn't touch anyone the sheet has no block for, and reports (rather than
+ * guesses at) any block name that didn't match a worker. */
+export async function importAvailabilityCsvAction(csvText: string): Promise<CsvImportSummary> {
+  const session = await getSession();
+  if (!session?.isAdmin) throw new Error("Admin only");
+  const week = await getCurrentWeek();
+  if (!week) throw new Error("No active week");
+  const workers = await getWorkers();
+
+  const { updates, matched, unmatched } = parseAvailabilityCsv(csvText, workers);
+  await setAvailabilityCells(week.id, updates);
+  revalidatePath("/admin/availability");
+  revalidatePath("/me/availability");
+  return { matched, unmatched, cellsUpdated: updates.length };
 }

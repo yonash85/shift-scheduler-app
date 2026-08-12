@@ -145,6 +145,19 @@ export async function getAvailability(weekId: string, workers: WorkerRow[]): Pro
   return availability;
 }
 
+/** Upserts many cells in one round trip — a CSV import can easily be hundreds of cells,
+ * and awaiting setAvailabilityCell in a loop would be one request per cell. */
+export async function setAvailabilityCells(
+  weekId: string,
+  cells: { workerId: string; day: string; shiftKey: ShiftKey; status: "can" | "prefer_not" | "cant" }[]
+): Promise<void> {
+  if (cells.length === 0) return;
+  const { error } = await supabaseAdmin()
+    .from("availability")
+    .upsert(cells.map((c) => ({ week_id: weekId, worker_id: c.workerId, day: c.day, shift_key: c.shiftKey, status: c.status })));
+  if (error) throw error;
+}
+
 export async function setAvailabilityCell(
   weekId: string,
   workerId: string,

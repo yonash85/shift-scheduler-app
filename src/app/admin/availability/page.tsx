@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getWorkers, getCurrentWeek, getAvailability } from "@/lib/data";
 import { DAYS, SHIFTS } from "@/lib/scheduler";
 import AvailabilityGrid from "@/components/AvailabilityGrid";
+import CsvImportForm from "@/components/CsvImportForm";
 
 function countFlags(av: Record<string, Partial<Record<string, string>>>) {
   let cant = 0,
@@ -22,6 +23,16 @@ export default async function AdminAvailabilityPage({ searchParams }: { searchPa
 
   return (
     <div className="flex flex-col gap-4.5">
+      <div className="bg-surface border border-border rounded-xl p-5">
+        <h2 className="text-sm font-semibold text-text mb-0.5">Import from CSV</h2>
+        <p className="text-[12.5px] text-text-muted mb-3">
+          Upload the weekly planning-sheet export — matches each person&apos;s block by name and overwrites their
+          availability for this week (Morning/Mid/Evening/Deep Night from the sheet; Bridge is set to match Deep Night,
+          since the sheet doesn&apos;t track it separately). Anyone the sheet has no block for is left untouched.
+        </p>
+        <CsvImportForm />
+      </div>
+
       <div className="bg-surface border border-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-text">Team availability — {week?.label ?? "no active week"}</h2>
         <p className="text-[12.5px] text-text-muted mb-3">Pick someone to view or edit their per-shift availability.</p>
